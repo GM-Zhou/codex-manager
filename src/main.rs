@@ -19,6 +19,20 @@ const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 #[cfg(target_os = "macos")]
 const CODEX_KEYCHAIN_SERVICE: &str = "Codex Auth";
+const SHARED_PROFILE_ENTRIES: &[&str] = &[
+    "config.toml",
+    "session_index.jsonl",
+    "sessions",
+    "archived_sessions",
+    "history.jsonl",
+    "vendor_imports",
+    "models_cache.json",
+    "cache",
+    "log",
+    "shell_snapshots",
+    "version.json",
+    ".codex-global-state.json",
+];
 
 type AppResult<T> = Result<T, String>;
 
@@ -28,7 +42,7 @@ type AppResult<T> = Result<T, String>;
     version,
     about = "Codex multi-account CLI manager",
     long_about = "Manage multiple Codex accounts from command line, switch accounts, inspect quotas, and start Codex in current directory with a selected account.",
-    after_help = "Examples:\n  codexm\n  codexm new\n  codexm new user@example.com\n  codexm add\n  codexm ls\n  codexm list\n  codexm switch user@example.com\n  codexm switch --force-refresh user@example.com\n\nNotes:\n  - Running `codexm` without subcommand is equivalent to `codexm new`.\n  - Account data is stored under ~/.codex-manager.\n  - `switch` updates ~/.codex/auth.json and macOS Keychain for the default profile.\n  - `new` launches Codex with an isolated CODEX_HOME per account.\n  - In interactive account picker, press Esc or Ctrl+C to cancel silently."
+    after_help = "Examples:\n  codexm\n  codexm new\n  codexm new user@example.com\n  codexm add\n  codexm ls\n  codexm list\n  codexm switch user@example.com\n  codexm switch --force-refresh user@example.com\n  codexm delete user@example.com\n  codexm rm\n\nNotes:\n  - Running `codexm` without subcommand is equivalent to `codexm new`.\n  - Account data is stored under ~/.codex-manager.\n  - `switch` updates ~/.codex/auth.json and macOS Keychain for the default profile.\n  - `new` launches Codex with an isolated CODEX_HOME per account.\n  - In interactive account picker, press Esc or Ctrl+C to cancel silently."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -73,6 +87,18 @@ enum Commands {
         #[arg(
             help = "Account email (optional; choose interactively when omitted)",
             long_help = "Account email to use for this launch. When omitted, an interactive account picker is shown.\n\nExamples:\n  codexm new\n  codexm new user@example.com"
+        )]
+        email: Option<String>,
+    },
+    #[command(
+        about = "Delete account and local workspace",
+        long_about = "Delete account from local store and remove its local workspace under ~/.codex-manager/instances. If no identifier is provided, choose account interactively.",
+        visible_alias = "rm"
+    )]
+    Delete {
+        #[arg(
+            help = "Account identifier (name / email / id)",
+            long_help = "Account identifier used to match an account. Supports exact value or partial match across name, email, and id.\n\nExamples:\n  codexm delete user@example.com\n  codexm rm user@example.com\n  codexm delete"
         )]
         email: Option<String>,
     },
@@ -188,6 +214,7 @@ async fn run() -> AppResult<()> {
             force_refresh,
         }) => switch_account(name, force_refresh).await,
         Some(Commands::New { email }) => start_codex_with_account(email).await,
+        Some(Commands::Delete { email }) => delete_account(email).await,
         None => start_codex_with_account(None).await,
     }
 }
@@ -353,6 +380,8 @@ async fn switch_account(name: Option<String>, force_refresh: bool) -> AppResult<
     let selected_id = if let Some(name) = name {
         resolve_account_id_by_name(&state, &index, &name)?
     } else {
+        println!("Refreshing account quotas...");
+        refresh_all_accounts_cache_for_picker(&state, &mut index).await?;
         pick_account_interactively(&state, &index)?
     };
 
@@ -372,6 +401,10 @@ async fn switch_account(name: Option<String>, force_refresh: bool) -> AppResult<
         }
     }
 
+    if let Err(err) = refresh_account_quota(&mut account).await {
+        account.quota_error = Some(err);
+    }
+
     write_auth_json_for_account(&account)?;
     account.last_used = Utc::now().timestamp();
     save_account(&state, &account)?;
@@ -380,6 +413,101 @@ async fn switch_account(name: Option<String>, force_refresh: bool) -> AppResult<
     save_index(&state, &index)?;
 
     println!("Switched to account: {} ({})", account.name, account.email);
+    Ok(())
+}
+
+async fn refresh_all_accounts_cache_for_picker(
+    state: &State,
+    index: &mut AccountIndex,
+) -> AppResult<()> {
+    let account_ids: Vec<String> = index.accounts.iter().map(|item| item.id.clone()).collect();
+    for account_id in account_ids {
+        let Some(mut account) = load_account(state, &account_id) else {
+            continue;
+        };
+        if let Err(err) = refresh_account_quota(&mut account).await {
+            account.quota_error = Some(err);
+        }
+        save_account(state, &account)?;
+        upsert_summary(index, &account);
+    }
+    save_index(state, index)?;
+    Ok(())
+}
+
+async fn delete_account(email: Option<String>) -> AppResult<()> {
+    let state = load_state()?;
+    let mut index = load_index(&state)?;
+    if index.accounts.is_empty() {
+        return Err("No accounts found, run `codexm add` first".to_string());
+    }
+
+    let selected_id = if let Some(email) = email {
+        resolve_account_id_by_name(&state, &index, &email)?
+    } else {
+        pick_account_interactively(&state, &index)?
+    };
+
+    let account = load_account(&state, &selected_id)
+        .ok_or_else(|| format!("Account not found: {}", selected_id))?;
+
+    let confirm_items = vec![
+        format!("ok - delete {}", account.email),
+        "cancel".to_string(),
+    ];
+    let confirm_choice = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Confirm account deletion")
+        .items(&confirm_items)
+        .default(1)
+        .interact_opt()
+        .map_err(|e| {
+            let message = e.to_string();
+            let lower = message.to_ascii_lowercase();
+            if lower.contains("interrupted")
+                || lower.contains("cancelled")
+                || lower.contains("canceled")
+            {
+                "Selection cancelled".to_string()
+            } else {
+                format!("Failed to confirm account deletion: {}", e)
+            }
+        })?
+        .ok_or_else(|| "Selection cancelled".to_string())?;
+
+    if confirm_choice != 0 {
+        return Err("Deletion cancelled".to_string());
+    }
+
+    let account_file_path = state.accounts_dir.join(format!("{}.json", account.id));
+    if account_file_path.exists() {
+        fs::remove_file(&account_file_path).map_err(|e| {
+            format!(
+                "Failed to delete account file ({}): {}",
+                account_file_path.display(),
+                e
+            )
+        })?;
+    }
+
+    let instance_dir = state.instances_dir.join(&account.id);
+    if instance_dir.exists() {
+        fs::remove_dir_all(&instance_dir).map_err(|e| {
+            format!(
+                "Failed to delete account workspace ({}): {}",
+                instance_dir.display(),
+                e
+            )
+        })?;
+    }
+    delete_codex_keychain_for_dir(&instance_dir)?;
+
+    index.accounts.retain(|item| item.id != account.id);
+    if index.current_account_id.as_deref() == Some(account.id.as_str()) {
+        index.current_account_id = None;
+    }
+    save_index(&state, &index)?;
+
+    println!("Deleted account: {}", account.email);
     Ok(())
 }
 
@@ -416,6 +544,8 @@ async fn start_codex_with_account(email: Option<String>) -> AppResult<()> {
     let profile_dir = state.instances_dir.join(&account.id);
     fs::create_dir_all(&profile_dir)
         .map_err(|e| format!("Failed to create instance profile directory: {}", e))?;
+    let default_home = resolve_codex_home();
+    ensure_profile_shared_links(&profile_dir, &default_home)?;
     write_auth_json_for_account_to_dir(&account, &profile_dir)?;
 
     let cwd = std::env::current_dir().map_err(|e| format!("Failed to get current directory: {}", e))?;
@@ -437,6 +567,179 @@ async fn start_codex_with_account(email: Option<String>) -> AppResult<()> {
     }
     Ok(())
 }
+
+fn ensure_profile_shared_links(profile_dir: &Path, default_home: &Path) -> AppResult<()> {
+    if profile_dir == default_home {
+        return Ok(());
+    }
+
+    let backup_root = profile_dir
+        .join(".codexm-local-backup")
+        .join(Utc::now().format("%Y%m%d-%H%M%S").to_string());
+    let mut copy_fallback_entries: Vec<String> = Vec::new();
+
+    for relative in SHARED_PROFILE_ENTRIES {
+        let source = default_home.join(relative);
+        if !source.exists() {
+            continue;
+        }
+
+        let target = profile_dir.join(relative);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "Failed to create shared-entry parent directory ({}): {}",
+                    parent.display(),
+                    e
+                )
+            })?;
+        }
+
+        if let Ok(metadata) = fs::symlink_metadata(&target) {
+            if metadata.file_type().is_symlink() {
+                if let Ok(link_to) = fs::read_link(&target) {
+                    if link_to == source {
+                        continue;
+                    }
+                }
+                remove_existing_path(&target, &metadata)?;
+            } else {
+                let backup_path = backup_root.join(relative);
+                if let Some(parent) = backup_path.parent() {
+                    fs::create_dir_all(parent).map_err(|e| {
+                        format!(
+                            "Failed to create backup directory ({}): {}",
+                            parent.display(),
+                            e
+                        )
+                    })?;
+                }
+                fs::rename(&target, &backup_path).map_err(|e| {
+                    format!(
+                        "Failed to backup existing path before linking ({} -> {}): {}",
+                        target.display(),
+                        backup_path.display(),
+                        e
+                    )
+                })?;
+            }
+        }
+
+        let used_copy_fallback = create_symlink(&source, &target, source.is_dir())?;
+        if used_copy_fallback {
+            copy_fallback_entries.push(relative.to_string());
+        }
+    }
+
+    warn_copy_fallback_if_needed(&copy_fallback_entries);
+    Ok(())
+}
+
+fn remove_existing_path(path: &Path, metadata: &fs::Metadata) -> AppResult<()> {
+    if metadata.is_dir() {
+        fs::remove_dir_all(path).map_err(|e| {
+            format!(
+                "Failed to remove existing directory before relinking ({}): {}",
+                path.display(),
+                e
+            )
+        })
+    } else {
+        fs::remove_file(path).map_err(|e| {
+            format!(
+                "Failed to remove existing file before relinking ({}): {}",
+                path.display(),
+                e
+            )
+        })
+    }
+}
+
+#[cfg(unix)]
+fn create_symlink(source: &Path, target: &Path, _is_dir: bool) -> AppResult<bool> {
+    std::os::unix::fs::symlink(source, target).map_err(|e| {
+        format!(
+            "Failed to create symlink ({} -> {}): {}",
+            target.display(),
+            source.display(),
+            e
+        )
+    })?;
+    Ok(false)
+}
+
+#[cfg(windows)]
+fn create_symlink(source: &Path, target: &Path, is_dir: bool) -> AppResult<bool> {
+    let symlink_result = if is_dir {
+        std::os::windows::fs::symlink_dir(source, target)
+    } else {
+        std::os::windows::fs::symlink_file(source, target)
+    };
+
+    if symlink_result.is_ok() {
+        return Ok(false);
+    }
+
+    // On Windows, symlink may fail without Developer Mode/admin permission.
+    // Fallback to copy to keep feature usable.
+    if is_dir {
+        copy_dir_recursive(source, target).map_err(|e| {
+            format!(
+                "Failed to create symlink and fallback copy for directory ({} -> {}): {}",
+                source.display(),
+                target.display(),
+                e
+            )
+        })?;
+    } else {
+        fs::copy(source, target).map_err(|e| {
+            format!(
+                "Failed to create symlink and fallback copy for file ({} -> {}): {}",
+                source.display(),
+                target.display(),
+                e
+            )
+        })?;
+    }
+    Ok(true)
+}
+
+#[cfg(windows)]
+fn copy_dir_recursive(source: &Path, target: &Path) -> Result<(), std::io::Error> {
+    fs::create_dir_all(target)?;
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let source_path = entry.path();
+        let target_path = target.join(entry.file_name());
+        let metadata = entry.metadata()?;
+        if metadata.is_dir() {
+            copy_dir_recursive(&source_path, &target_path)?;
+        } else {
+            fs::copy(&source_path, &target_path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn warn_copy_fallback_if_needed(entries: &[String]) {
+    if entries.is_empty() {
+        return;
+    }
+    eprintln!(
+        "[codexm warning] Symlink permission is unavailable on this Windows environment, so some shared paths were copied instead: {}",
+        entries.join(", ")
+    );
+    eprintln!(
+        "[codexm warning] While using copy fallback, writes to those paths will NOT sync back to the global workspace (~/.codex)."
+    );
+    eprintln!(
+        "[codexm warning] To enable true sync, enable Windows Developer Mode or run terminal as Administrator, then start codexm again."
+    );
+}
+
+#[cfg(not(windows))]
+fn warn_copy_fallback_if_needed(_entries: &[String]) {}
 
 fn resolve_account_id_by_name(state: &State, index: &AccountIndex, name: &str) -> AppResult<String> {
     let needle = name.trim();
@@ -544,7 +847,7 @@ fn pick_account_interactively(state: &State, index: &AccountIndex) -> AppResult<
 fn is_silent_cancel_error(error: &str) -> bool {
     matches!(
         error.trim(),
-        "Selection cancelled" | "Operation cancelled" | "Canceled"
+        "Selection cancelled" | "Operation cancelled" | "Canceled" | "Deletion cancelled"
     )
 }
 
@@ -786,6 +1089,42 @@ fn write_codex_keychain_to_dir(base_dir: &Path, payload: &serde_json::Value) -> 
 
 #[cfg(not(target_os = "macos"))]
 fn write_codex_keychain_to_dir(_base_dir: &Path, _payload: &serde_json::Value) -> AppResult<()> {
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn delete_codex_keychain_for_dir(base_dir: &Path) -> AppResult<()> {
+    let keychain_account = build_codex_keychain_account(base_dir);
+    let output = Command::new("security")
+        .arg("delete-generic-password")
+        .arg("-s")
+        .arg(CODEX_KEYCHAIN_SERVICE)
+        .arg("-a")
+        .arg(&keychain_account)
+        .output()
+        .map_err(|e| format!("Failed to run security delete command: {}", e))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).to_ascii_lowercase();
+    // Ignore not-found cases.
+    if stderr.contains("could not be found") || stderr.contains("the specified item could not be found") {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Failed to delete keychain item (service={}, account={}): status={}, stderr={}",
+        CODEX_KEYCHAIN_SERVICE,
+        keychain_account,
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn delete_codex_keychain_for_dir(_base_dir: &Path) -> AppResult<()> {
     Ok(())
 }
 
