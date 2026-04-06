@@ -329,7 +329,12 @@ async fn list_accounts_with_quota() -> AppResult<()> {
         } else {
             " ".to_string()
         };
-        println!("{} {}", current_mark, account.email.bright_black());
+        let email_display = if is_current {
+            account.email.bright_white().bold().to_string()
+        } else {
+            account.email.bright_cyan().to_string()
+        };
+        println!("{} {}", current_mark, email_display);
         println!(
             "  {} {}",
             "id:".bright_black(),
