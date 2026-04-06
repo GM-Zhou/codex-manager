@@ -312,22 +312,15 @@ async fn list_accounts_with_quota() -> AppResult<()> {
         return Ok(());
     }
 
+    println!("Refreshing account quotas...");
+    refresh_all_accounts_cache_for_picker(&state, &mut index).await?;
+
     let mut accounts = Vec::new();
     for summary in &index.accounts {
         if let Some(account) = load_account(&state, &summary.id) {
             accounts.push(account);
         }
     }
-
-    for account in &mut accounts {
-        let result = refresh_account_quota(account).await;
-        if let Err(err) = result {
-            account.quota_error = Some(err);
-        }
-        save_account(&state, account)?;
-        upsert_summary(&mut index, account);
-    }
-    save_index(&state, &index)?;
 
     for account in accounts {
         let is_current = index.current_account_id.as_deref() == Some(account.id.as_str());
