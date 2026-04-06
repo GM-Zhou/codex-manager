@@ -472,10 +472,10 @@ async fn switch_account(name: Option<String>, force_refresh: bool) -> AppResult<
             .clone()
             .ok_or_else(|| "force-refresh requested but refresh_token is missing".to_string())?;
         account.tokens = refresh_access_token(&refresh_token).await?;
-    } else if is_token_expired(&account.tokens.access_token) {
-        if let Some(refresh_token) = account.tokens.refresh_token.clone() {
-            account.tokens = refresh_access_token(&refresh_token).await?;
-        }
+    } else if is_token_expired(&account.tokens.access_token)
+        && let Some(refresh_token) = account.tokens.refresh_token.clone()
+    {
+        account.tokens = refresh_access_token(&refresh_token).await?;
     }
 
     if let Err(err) = refresh_account_quota(&mut account).await {
@@ -674,10 +674,10 @@ fn ensure_profile_shared_links(profile_dir: &Path, default_home: &Path) -> AppRe
 
         if let Ok(metadata) = fs::symlink_metadata(&target) {
             if metadata.file_type().is_symlink() {
-                if let Ok(link_to) = fs::read_link(&target) {
-                    if link_to == source {
-                        continue;
-                    }
+                if let Ok(link_to) = fs::read_link(&target)
+                    && link_to == source
+                {
+                    continue;
                 }
                 remove_existing_path(&target, &metadata)?;
             } else {
@@ -987,14 +987,14 @@ async fn fetch_usage(account: &StoredAccount) -> AppResult<(Quota, Option<String
         .account_id
         .clone()
         .or_else(|| extract_chatgpt_account_id(&account.tokens.access_token));
-    if let Some(acc_id) = account_id {
-        if !acc_id.is_empty() {
-            headers.insert(
-                "ChatGPT-Account-Id",
-                HeaderValue::from_str(&acc_id)
-                    .map_err(|e| format!("Failed to build ChatGPT-Account-Id header: {}", e))?,
-            );
-        }
+    if let Some(acc_id) = account_id
+        && !acc_id.is_empty()
+    {
+        headers.insert(
+            "ChatGPT-Account-Id",
+            HeaderValue::from_str(&acc_id)
+                .map_err(|e| format!("Failed to build ChatGPT-Account-Id header: {}", e))?,
+        );
     }
 
     let response = client
@@ -1284,10 +1284,10 @@ fn extract_chatgpt_organization_id(access_token: &str) -> Option<String> {
         "chatgpt_org_id",
         "org_id",
     ] {
-        if let Some(value) = auth.get(key).and_then(|v| v.as_str()) {
-            if !value.trim().is_empty() {
-                return Some(value.to_string());
-            }
+        if let Some(value) = auth.get(key).and_then(|v| v.as_str())
+            && !value.trim().is_empty()
+        {
+            return Some(value.to_string());
         }
     }
     None
@@ -1393,7 +1393,7 @@ fn replace_current_executable(current_exe: &Path, staged_path: &Path) -> AppResu
     {
         fs::rename(staged_path, current_exe)
             .map_err(|e| format!("Failed to replace current executable: {}", e))?;
-        return Ok(());
+        Ok(())
     }
 
     #[cfg(target_os = "windows")]
@@ -1415,7 +1415,7 @@ fn replace_current_executable(current_exe: &Path, staged_path: &Path) -> AppResu
             )
         })?;
         let _ = fs::remove_file(backup_path);
-        return Ok(());
+        Ok(())
     }
 }
 
@@ -1460,21 +1460,21 @@ fn load_state() -> AppResult<State> {
 
 fn load_index(state: &State) -> AppResult<AccountIndex> {
     if !state.index_path.exists() {
-        return Ok(AccountIndex {
-            version: "1".to_string(),
-            current_account_id: None,
-            accounts: vec![],
-        });
+        return Ok(empty_account_index());
     }
     let content = fs::read_to_string(&state.index_path).map_err(|e| format!("Failed to read index: {}", e))?;
     if content.trim().is_empty() {
-        return Ok(AccountIndex {
-            version: "1".to_string(),
-            current_account_id: None,
-            accounts: vec![],
-        });
+        return Ok(empty_account_index());
     }
     serde_json::from_str(&content).map_err(|e| format!("Failed to parse index: {}", e))
+}
+
+fn empty_account_index() -> AccountIndex {
+    AccountIndex {
+        version: "1".to_string(),
+        current_account_id: None,
+        accounts: vec![],
+    }
 }
 
 fn save_index(state: &State, index: &AccountIndex) -> AppResult<()> {
