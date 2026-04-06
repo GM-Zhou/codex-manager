@@ -43,7 +43,7 @@ type AppResult<T> = Result<T, String>;
     version,
     about = "Codex multi-account CLI manager",
     long_about = "Manage multiple Codex accounts from command line, switch accounts, inspect quotas, and start Codex in current directory with a selected account.",
-    after_help = "Examples:\n  codexm\n  codexm new\n  codexm new user@example.com\n  codexm add\n  codexm ls\n  codexm list\n  codexm switch user@example.com\n  codexm switch --force-refresh user@example.com\n  codexm delete user@example.com\n  codexm rm\n  codexm update\n  codexm update --version auto-v20260406-164524-6def1b8\n\nNotes:\n  - Running `codexm` without subcommand is equivalent to `codexm new`.\n  - Account data is stored under ~/.codex-manager.\n  - `switch` updates ~/.codex/auth.json and macOS Keychain for the default profile.\n  - `new` launches Codex with an isolated CODEX_HOME per account.\n  - In interactive account picker, press Esc or Ctrl+C to cancel silently."
+    after_help = "Examples:\n  codexm\n  codexm new\n  codexm new user@example.com\n  codexm add\n  codexm ls\n  codexm list\n  codexm switch user@example.com\n  codexm switch --force-refresh user@example.com\n  codexm delete user@example.com\n  codexm rm\n  codexm update\n  codexm update --version v1.0.0\n\nNotes:\n  - Running `codexm` without subcommand is equivalent to `codexm new`.\n  - Account data is stored under ~/.codex-manager.\n  - `switch` updates ~/.codex/auth.json and macOS Keychain for the default profile.\n  - `new` launches Codex with an isolated CODEX_HOME per account.\n  - In interactive account picker, press Esc or Ctrl+C to cancel silently."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -111,7 +111,7 @@ enum Commands {
         #[arg(
             long,
             help = "Release tag to install (default: latest)",
-            long_help = "Release tag to install. Use `latest` (default) for newest release.\n\nExamples:\n  codexm update\n  codexm update --version auto-v20260406-164524-6def1b8"
+            long_help = "Release tag to install. Use `latest` (default) for newest release.\n\nExamples:\n  codexm update\n  codexm update --version v1.0.0"
         )]
         version: Option<String>,
         #[arg(

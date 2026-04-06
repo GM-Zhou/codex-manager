@@ -32,10 +32,22 @@ It keeps account auth isolated while preserving a near-default Codex experience 
 curl -fsSL https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.sh | sh
 ```
 
+Install a specific version:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.sh | sh -s -- --version v1.0.0
+```
+
 ### Windows (PowerShell)
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.ps1 -OutFile $env:TEMP\codexm-install.ps1; & $env:TEMP\codexm-install.ps1 -Version latest"
+```
+
+Install a specific version:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.ps1 -OutFile $env:TEMP\codexm-install.ps1; & $env:TEMP\codexm-install.ps1 -Version v1.0.0"
 ```
 
 Use a different release repository (optional):
@@ -123,7 +135,7 @@ codexm update
 Install a specific release:
 
 ```bash
-codexm update --version auto-v20260406-164524-6def1b8
+codexm update --version v1.0.0
 ```
 
 ---
@@ -222,4 +234,9 @@ How to fix:
 - Account record in local store
 - Local workspace for that account under `~/.codex-manager/instances/<account_id>`
 - Related keychain entry (on macOS)
+
+### How are release versions tagged?
+
+- Release tags follow `v<version>` from `Cargo.toml` (for example `v1.0.0`)
+- Re-running release on the same version updates assets in the same tag
 
