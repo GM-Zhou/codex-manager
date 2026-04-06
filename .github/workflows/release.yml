@@ -29,7 +29,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             asset_name: codexm-windows-amd64.exe
             binary_name: codexm.exe
-          - runner: macos-13
+          - runner: macos-14
             target: x86_64-apple-darwin
             asset_name: codexm-darwin-amd64
             binary_name: codexm
@@ -94,15 +94,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          gh release create "${{ steps.tag.outputs.tag }}" \
-            "dist/codexm-linux-amd64" \
-            "dist/codexm-windows-amd64.exe" \
-            "dist/codexm-darwin-amd64" \
-            "dist/codexm-darwin-arm64" \
-            "dist/SHA256SUMS" \
-            --title "codexm ${{ steps.tag.outputs.tag }}" \
-            --notes "Automated release for commit \`${{ github.sha }}\` on \`master\`."
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: codexm ${{ steps.tag.outputs.tag }}
+          body: |
+            Automated release for commit `${{ github.sha }}` on `master`.
+          files: |
+            dist/codexm-linux-amd64
+            dist/codexm-windows-amd64.exe
+            dist/codexm-darwin-amd64
+            dist/codexm-darwin-arm64
+            dist/SHA256SUMS
