@@ -40,7 +40,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -58,7 +58,7 @@ jobs:
           chmod +x "dist/${{ matrix.asset_name }}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.asset_name }}
           path: dist/${{ matrix.asset_name }}
@@ -70,10 +70,10 @@ jobs:
     needs: build
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true
@@ -94,15 +94,15 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: codexm ${{ steps.tag.outputs.tag }}
-          body: |
-            Automated release for commit `${{ github.sha }}` on `master`.
-          files: |
-            dist/codexm-linux-amd64
-            dist/codexm-windows-amd64.exe
-            dist/codexm-darwin-amd64
-            dist/codexm-darwin-arm64
-            dist/SHA256SUMS
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            "dist/codexm-linux-amd64" \
+            "dist/codexm-windows-amd64.exe" \
+            "dist/codexm-darwin-amd64" \
+            "dist/codexm-darwin-arm64" \
+            "dist/SHA256SUMS" \
+            --title "codexm ${{ steps.tag.outputs.tag }}" \
+            --notes "Automated release for commit \`${{ github.sha }}\` on \`master\`."
