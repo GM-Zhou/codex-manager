@@ -114,6 +114,18 @@ codexm delete
 
 After selecting an account, you must confirm with `ok` before deletion is executed.
 
+### 6) Self update
+
+```bash
+codexm update
+```
+
+Install a specific release:
+
+```bash
+codexm update --version auto-v20260406-164524-6def1b8
+```
+
 ---
 
 ## 🧭 Command Reference
@@ -138,6 +150,9 @@ After selecting an account, you must confirm with `ok` before deletion is execut
 
 - `codexm delete [email]` / `codexm rm [email]`  
   Delete account from local store and remove its local workspace (with confirmation)
+
+- `codexm update [--version <tag>]`  
+  Self-update `codexm` from GitHub Releases
 
 ---
 

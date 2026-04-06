@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 const TOKEN_ENDPOINT: &str = "https://auth.openai.com/oauth/token";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+const DEFAULT_RELEASE_REPO: &str = "GM-Zhou/codex-manager";
 #[cfg(target_os = "macos")]
 const CODEX_KEYCHAIN_SERVICE: &str = "Codex Auth";
 const SHARED_PROFILE_ENTRIES: &[&str] = &[
@@ -42,7 +43,7 @@ type AppResult<T> = Result<T, String>;
     version,
     about = "Codex multi-account CLI manager",
     long_about = "Manage multiple Codex accounts from command line, switch accounts, inspect quotas, and start Codex in current directory with a selected account.",
-    after_help = "Examples:\n  codexm\n  codexm new\n  codexm new user@example.com\n  codexm add\n  codexm ls\n  codexm list\n  codexm switch user@example.com\n  codexm switch --force-refresh user@example.com\n  codexm delete user@example.com\n  codexm rm\n\nNotes:\n  - Running `codexm` without subcommand is equivalent to `codexm new`.\n  - Account data is stored under ~/.codex-manager.\n  - `switch` updates ~/.codex/auth.json and macOS Keychain for the default profile.\n  - `new` launches Codex with an isolated CODEX_HOME per account.\n  - In interactive account picker, press Esc or Ctrl+C to cancel silently."
+    after_help = "Examples:\n  codexm\n  codexm new\n  codexm new user@example.com\n  codexm add\n  codexm ls\n  codexm list\n  codexm switch user@example.com\n  codexm switch --force-refresh user@example.com\n  codexm delete user@example.com\n  codexm rm\n  codexm update\n  codexm update --version auto-v20260406-164524-6def1b8\n\nNotes:\n  - Running `codexm` without subcommand is equivalent to `codexm new`.\n  - Account data is stored under ~/.codex-manager.\n  - `switch` updates ~/.codex/auth.json and macOS Keychain for the default profile.\n  - `new` launches Codex with an isolated CODEX_HOME per account.\n  - In interactive account picker, press Esc or Ctrl+C to cancel silently."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -101,6 +102,25 @@ enum Commands {
             long_help = "Account identifier used to match an account. Supports exact value or partial match across name, email, and id.\n\nExamples:\n  codexm delete user@example.com\n  codexm rm user@example.com\n  codexm delete"
         )]
         email: Option<String>,
+    },
+    #[command(
+        about = "Self-update codexm binary",
+        long_about = "Download codexm binary from GitHub Releases and replace current executable in place. Defaults to latest release."
+    )]
+    Update {
+        #[arg(
+            long,
+            help = "Release tag to install (default: latest)",
+            long_help = "Release tag to install. Use `latest` (default) for newest release.\n\nExamples:\n  codexm update\n  codexm update --version auto-v20260406-164524-6def1b8"
+        )]
+        version: Option<String>,
+        #[arg(
+            long,
+            hide = true,
+            help = "Override release repo (owner/repo)",
+            long_help = "Override release repository in owner/repo format. Defaults to GM-Zhou/codex-manager (or CODEXM_REPO env if set)."
+        )]
+        repo: Option<String>,
     },
 }
 
@@ -215,8 +235,67 @@ async fn run() -> AppResult<()> {
         }) => switch_account(name, force_refresh).await,
         Some(Commands::New { email }) => start_codex_with_account(email).await,
         Some(Commands::Delete { email }) => delete_account(email).await,
+        Some(Commands::Update { version, repo }) => self_update(version, repo).await,
         None => start_codex_with_account(None).await,
     }
+}
+
+async fn self_update(version: Option<String>, repo: Option<String>) -> AppResult<()> {
+    let release_version = version.unwrap_or_else(|| "latest".to_string());
+    let release_repo = repo
+        .or_else(|| std::env::var("CODEXM_REPO").ok())
+        .unwrap_or_else(|| DEFAULT_RELEASE_REPO.to_string());
+    let (asset_os, asset_arch, asset_ext) = detect_release_target()?;
+    let asset_name = format!("codexm-{}-{}{}", asset_os, asset_arch, asset_ext);
+
+    let release_path = if release_version.eq_ignore_ascii_case("latest") {
+        "releases/latest/download".to_string()
+    } else {
+        format!("releases/download/{}", release_version)
+    };
+    let download_url = format!(
+        "https://github.com/{}/{}/{}",
+        release_repo, release_path, asset_name
+    );
+
+    println!(
+        "Updating codexm from {} ({}) for {}-{}...",
+        release_repo, release_version, asset_os, asset_arch
+    );
+    let response = reqwest::Client::new()
+        .get(&download_url)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to download update: {}", e))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Failed to download update ({}): {}",
+            response.status(),
+            download_url
+        ));
+    }
+    let content = response
+        .bytes()
+        .await
+        .map_err(|e| format!("Failed to read update binary: {}", e))?;
+
+    let current_exe =
+        std::env::current_exe().map_err(|e| format!("Failed to resolve current executable: {}", e))?;
+    let exe_dir = current_exe
+        .parent()
+        .ok_or_else(|| "Failed to resolve executable directory".to_string())?;
+    let exe_name = current_exe
+        .file_name()
+        .ok_or_else(|| "Failed to resolve executable name".to_string())?;
+    let staged_path = exe_dir.join(format!("{}.new", exe_name.to_string_lossy()));
+
+    fs::write(&staged_path, &content).map_err(|e| format!("Failed to write staged binary: {}", e))?;
+    make_binary_executable(&staged_path)?;
+    replace_current_executable(&current_exe, &staged_path)?;
+
+    println!("Updated successfully: {}", current_exe.display());
+    println!("Run `codexm --version` to verify.");
+    Ok(())
 }
 
 async fn add_account() -> AppResult<()> {
@@ -1276,6 +1355,67 @@ fn color_plan(plan: &str) -> String {
         "plus" | "pro" => plan.bright_cyan().bold().to_string(),
         "team" | "business" | "enterprise" => plan.bright_magenta().bold().to_string(),
         _ => plan.normal().to_string(),
+    }
+}
+
+fn detect_release_target() -> AppResult<(&'static str, &'static str, &'static str)> {
+    let os = match std::env::consts::OS {
+        "macos" => "darwin",
+        "linux" => "linux",
+        "windows" => "windows",
+        other => return Err(format!("Unsupported OS for self-update: {}", other)),
+    };
+    let arch = match std::env::consts::ARCH {
+        "x86_64" | "amd64" => "amd64",
+        "aarch64" | "arm64" => "arm64",
+        other => return Err(format!("Unsupported architecture for self-update: {}", other)),
+    };
+    let ext = if os == "windows" { ".exe" } else { "" };
+    Ok((os, arch, ext))
+}
+
+fn make_binary_executable(path: &Path) -> AppResult<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(path)
+            .map_err(|e| format!("Failed to read update binary metadata: {}", e))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms)
+            .map_err(|e| format!("Failed to set update binary permission: {}", e))?;
+    }
+    Ok(())
+}
+
+fn replace_current_executable(current_exe: &Path, staged_path: &Path) -> AppResult<()> {
+    #[cfg(not(target_os = "windows"))]
+    {
+        fs::rename(staged_path, current_exe)
+            .map_err(|e| format!("Failed to replace current executable: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let backup_path = current_exe.with_extension("old");
+        let _ = fs::remove_file(&backup_path);
+        fs::rename(current_exe, &backup_path).map_err(|e| {
+            format!(
+                "Failed to prepare executable replacement on Windows: {}. New binary is staged at {}. Please close codexm and replace manually.",
+                e,
+                staged_path.display()
+            )
+        })?;
+        fs::rename(staged_path, current_exe).map_err(|e| {
+            format!(
+                "Failed to complete executable replacement on Windows: {}. New binary is staged at {}. Please replace manually.",
+                e,
+                staged_path.display()
+            )
+        })?;
+        let _ = fs::remove_file(backup_path);
+        return Ok(());
     }
 }
 

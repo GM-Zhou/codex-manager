@@ -18,9 +18,28 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare_release:
+    name: Prepare release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "${{ env.RELEASE_TAG }}" >/dev/null 2>&1; then
+            echo "Release already exists: ${{ env.RELEASE_TAG }}"
+            exit 0
+          fi
+          gh release create "${{ env.RELEASE_TAG }}" \
+            --target "${{ github.sha }}" \
+            --title "codexm ${{ env.RELEASE_TAG }}" \
+            --notes "Automated release for commit \`${{ github.sha }}\` on \`master\`."
+
   build:
     name: Build ${{ matrix.asset_name }}
     runs-on: ${{ matrix.runner }}
+    needs: prepare_release
     strategy:
       fail-fast: false
       matrix:
@@ -62,19 +81,6 @@ jobs:
           mkdir -p dist
           cp "target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "dist/${{ matrix.asset_name }}"
           chmod +x "dist/${{ matrix.asset_name }}"
-
-      - name: Ensure release exists
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          if ! gh release view "${{ env.RELEASE_TAG }}" >/dev/null 2>&1; then
-            gh release create "${{ env.RELEASE_TAG }}" \
-              --title "codexm ${{ env.RELEASE_TAG }}" \
-              --notes "Automated release for commit \`${{ github.sha }}\` on \`master\`." \
-              >/dev/null 2>&1 || true
-          fi
-          gh release view "${{ env.RELEASE_TAG }}" >/dev/null
 
       - name: Upload binary asset
         env:
