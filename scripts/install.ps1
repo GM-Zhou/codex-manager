@@ -1,6 +1,5 @@
 Param(
-  [Parameter(Mandatory = $true)]
-  [string]$Repo,
+  [string]$Repo = "GM-Zhou/codex-manager",
 
   [string]$Version = "latest",
   [string]$InstallDir = "$HOME\AppData\Local\bin"

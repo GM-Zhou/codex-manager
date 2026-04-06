@@ -2,7 +2,7 @@
 set -eu
 
 BIN_NAME="codexm"
-REPO="${CODEXM_REPO:-}"
+REPO="${CODEXM_REPO:-GM-Zhou/codex-manager}"
 VERSION="${CODEXM_VERSION:-latest}"
 INSTALL_DIR="${CODEXM_INSTALL_DIR:-$HOME/.local/bin}"
 
@@ -11,14 +11,15 @@ usage() {
 Install codexm from GitHub Releases.
 
 Usage:
-  install.sh --repo <owner/repo> [--version <tag|latest>] [--install-dir <dir>]
+  install.sh [--repo <owner/repo>] [--version <tag|latest>] [--install-dir <dir>]
 
 Examples:
-  curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install.sh | sh -s -- --repo <owner/repo>
-  curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install.sh | sh -s -- --repo <owner/repo> --version v0.1.0
+  curl -fsSL https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.sh | sh
+  curl -fsSL https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.sh | sh -s -- --version v0.1.0
+  curl -fsSL https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.sh | sh -s -- --repo yourname/yourfork
 
 Options:
-  --repo         GitHub repository in owner/repo format (required if CODEXM_REPO is unset)
+  --repo         GitHub repository in owner/repo format (default: GM-Zhou/codex-manager)
   --version      Release tag, e.g. v0.1.0 (default: latest)
   --install-dir  Target install directory (default: ~/.local/bin)
   -h, --help     Show this help
@@ -50,12 +51,6 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
-
-if [ -z "$REPO" ]; then
-  echo "Error: --repo is required (or set CODEXM_REPO)." >&2
-  usage >&2
-  exit 1
-fi
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH="$(uname -m)"

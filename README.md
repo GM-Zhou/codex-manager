@@ -29,13 +29,19 @@ It keeps account auth isolated while preserving a near-default Codex experience 
 ### macOS / Linux (curl)
 
 ```bash
-curl -fsSL <INSTALL_SCRIPT_URL> | sh
+curl -fsSL https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.sh | sh
 ```
 
 ### Windows (PowerShell)
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -Repo <owner/repo> -Version latest
+powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.ps1 -OutFile $env:TEMP\codexm-install.ps1; & $env:TEMP\codexm-install.ps1 -Version latest"
+```
+
+Use a different release repository (optional):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/GM-Zhou/codex-manager/master/scripts/install.sh | sh -s -- --repo yourname/yourfork --version latest
 ```
 
 ### Uninstall
